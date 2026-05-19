@@ -60,21 +60,20 @@ async function fetchFromRacingAPI() {
   try {
     const today = new Date().toISOString().split("T")[0];
     const auth = Buffer.from(`${u}:${p}`).toString("base64");
-    // Basic Plan endpoint — tries basic first, falls back to standard
-    const endpoints = [
-      `https://api.theracingapi.com/v1/racecards/basic?date=${today}&region_codes=gb&type=flat`,
-      `https://api.theracingapi.com/v1/racecards?date=${today}&region_codes=gb&type=flat`,
-    ];
-    let res = null;
-    for (const url of endpoints) {
-      console.log("Trying Racing API endpoint:", url);
-      res = await fetch(url, { headers: { "Authorization": `Basic ${auth}`, "Content-Type": "application/json" } });
-      console.log("  Status:", res.status);
-      if (res.ok) break;
-      if (res.status === 401) { console.error("Auth failed — check credentials"); return null; }
-      if (res.status === 403) { console.log("Plan restriction on this endpoint, trying next..."); }
+    // Try pro endpoint first, fall back to standard
+    let res = await fetch(
+      `https://api.theracingapi.com/v1/racecards/pro?date=${today}&region_codes=gb&type=flat`,
+      { headers: { "Authorization": `Basic ${auth}`, "Content-Type": "application/json" } }
+    );
+    // If pro fails, try standard endpoint
+    if (!res.ok && res.status === 403) {
+      console.log("Pro endpoint returned 403, trying standard endpoint...");
+      res = await fetch(
+        `https://api.theracingapi.com/v1/racecards?date=${today}&region_codes=gb`,
+        { headers: { "Authorization": `Basic ${auth}`, "Content-Type": "application/json" } }
+      );
     }
-    if (!res || !res.ok) { console.error("All endpoints failed, status:", res?.status); return null; }
+    console.log("Racing API URL status:", res.status, res.url);
     const bodyText = await res.text();
     if (!res.ok) {
       console.error("Racing API error:", res.status, bodyText.slice(0,300));
@@ -193,8 +192,7 @@ app.get("/api/debug", async (req, res) => {
     try {
       const auth = Buffer.from(`${u}:${p}`).toString("base64");
       const today = new Date().toISOString().split("T")[0];
-      // Basic Plan endpoint
-      const testRes = await fetch(`https://api.theracingapi.com/v1/racecards/basic?date=${today}&region_codes=gb&type=flat`, {
+      const testRes = await fetch(`https://api.theracingapi.com/v1/racecards?date=${today}&region_codes=gb`, {
         headers: { "Authorization": `Basic ${auth}` }
       });
       const body = await testRes.text();
