@@ -268,6 +268,9 @@ async function callClaude(prompt) {
 /* ─── MAIN APP ───────────────────────────────────────────────── */
 export default function App() {
   const [view, setView]           = useState("races");
+  const [races, setRaces]         = useState(RACES);
+  const [raceSource, setRaceSource] = useState("sample");
+  const [racesLoading, setRacesLoading] = useState(true);
   const [activeRace, setActiveRace] = useState(null);
   const [preds, setPreds]         = useState(null);
   const [loading, setLoading]     = useState(false);
@@ -277,17 +280,45 @@ export default function App() {
   const [customOut, setCustomOut] = useState(null);
   const [customLoading, setCustomLoading] = useState(false);
   const [bankroll, setBankroll]   = useState(100);
-  const [stakeMode, setStakeMode] = useState("kelly"); // kelly | level | percent
+  const [stakeMode, setStakeMode] = useState("kelly");
   const [levelStake, setLevelStake] = useState(10);
   const [calcResults, setCalcResults] = useState(null);
 
-  // History — simulated weekend record for ROI tracker
-  const [history] = useState([
-    { name: "Notable Speech", odds: "2/1", result: "WON",  profit: 20 },
-    { name: "Jonquil",        odds: "18/1",result: "LOST", profit: -10 },
-    { name: "Letsbefrank",    odds: "7/2", result: "WON",  profit: 35 },
-    { name: "Far Ahead",      odds: "6/1", result: "LOST", profit: -10 },
-    { name: "Ghaiyya",        odds: "8/1", result: "LOST", profit: -10 },
+  // Load live races from server on mount
+  useEffect(() => {
+    fetch("/api/races")
+      .then(r => r.json())
+      .then(d => {
+        if (d.races && d.races.length > 0) {
+          setRaces(d.races);
+          setRaceSource(d.source);
+        }
+        setRacesLoading(false);
+      })
+      .catch(() => setRacesLoading(false));
+  }, []);
+
+  const refreshRaces = () => {
+    setRacesLoading(true);
+    fetch("/api/races/refresh", { method: "POST" })
+      .then(r => r.json())
+      .then(d => {
+        if (d.races && d.races.length > 0) {
+          setRaces(d.races);
+          setRaceSource(d.source);
+        }
+        setRacesLoading(false);
+      })
+      .catch(() => setRacesLoading(false));
+  };
+
+  // ROI tracker — starts with sample weekend data, grows as you log bets
+  const [history, setHistory] = useState([
+    { name: "Notable Speech", odds: "2/1", result: "WON",  profit: 20, stake: 10, date: "17 May" },
+    { name: "Jonquil",        odds: "18/1",result: "LOST", profit: -10, stake: 10, date: "17 May" },
+    { name: "Letsbefrank",    odds: "7/2", result: "WON",  profit: 35, stake: 10, date: "18 May" },
+    { name: "Far Ahead",      odds: "6/1", result: "LOST", profit: -10, stake: 10, date: "18 May" },
+    { name: "Ghaiyya",        odds: "8/1", result: "LOST", profit: -10, stake: 10, date: "18 May" },
   ]);
 
   const analyse = (race) => {
@@ -455,9 +486,26 @@ Racing Post analytical style. Specific, authoritative, use racing terminology.`
         {/* ═══════════════ RACE CARD ═══════════════ */}
         {view === "races" && (
           <div>
-            <div style={{ fontSize: 10, letterSpacing: 3, color: T.muted, marginBottom: 12 }}>TODAY'S FEATURED RACES — SELECT TO ANALYSE</div>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12, flexWrap:"wrap", gap:8 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <div style={{ fontSize:10, letterSpacing:3, color:T.muted }}>
+                  {racesLoading ? "LOADING RACES..." : "TODAY'S RACES — " + races.length + " MEETINGS"}
+                </div>
+                {raceSource==="live" && <span style={{fontSize:9,fontWeight:800,color:T.green,background:T.green+"18",border:"1px solid "+T.green+"44",borderRadius:4,padding:"2px 7px",letterSpacing:1}}>🟢 LIVE DATA</span>}
+                {raceSource==="sample" && <span style={{fontSize:9,fontWeight:800,color:"#f59e0b",background:"#f59e0b18",border:"1px solid #f59e0b44",borderRadius:4,padding:"2px 7px",letterSpacing:1}}>⚠️ SAMPLE DATA</span>}
+                {raceSource==="cache" && <span style={{fontSize:9,fontWeight:800,color:T.cyan,background:T.cyan+"18",border:"1px solid "+T.cyan+"44",borderRadius:4,padding:"2px 7px",letterSpacing:1}}>📦 CACHED</span>}
+              </div>
+              <button onClick={refreshRaces} disabled={racesLoading} style={{background:T.card2,border:"1px solid "+T.border,color:racesLoading?T.dim:T.muted,borderRadius:6,padding:"5px 12px",fontWeight:700,fontSize:10,cursor:racesLoading?"not-allowed":"pointer",fontFamily:"monospace",letterSpacing:1}}>
+                {racesLoading ? "⏳ LOADING..." : "↻ REFRESH"}
+              </button>
+            </div>
+            {raceSource==="sample" && (
+              <div style={{background:"#1c1500",border:"1px solid #92400e",borderRadius:7,padding:"8px 14px",fontSize:11,color:"#fbbf24",marginBottom:12,lineHeight:1.6}}>
+                💡 <strong>Showing sample races.</strong> Add <code style={{background:"#00000033",padding:"1px 5px",borderRadius:3}}>RACING_API_USERNAME</code> + <code style={{background:"#00000033",padding:"1px 5px",borderRadius:3}}>RACING_API_PASSWORD</code> in Render env vars for live data. Free trial at <strong>theracingapi.com</strong>
+              </div>
+            )}
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {RACES.map((race, ri) => (
+              {races.map((race, ri) => (
                 <div key={ri} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden" }}>
                   <div style={{ background: `linear-gradient(90deg, ${T.card2}, ${T.surface})`, padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
                     <div>
@@ -465,6 +513,7 @@ Racing Post analytical style. Specific, authoritative, use racing terminology.`
                         <span style={{ background: T.gold, color: T.bg, borderRadius: 4, padding: "2px 9px", fontWeight: 900, fontSize: 12, letterSpacing: 1 }}>{race.time}</span>
                         <span style={{ fontWeight: 800, fontSize: 14, color: T.text }}>{race.course}</span>
                         <span style={{ color: T.muted, fontSize: 12 }}>{race.name}</span>
+                        {race.live && <span style={{fontSize:9,fontWeight:800,color:T.green,background:T.green+"18",border:"1px solid "+T.green+"44",borderRadius:3,padding:"1px 6px"}}>LIVE</span>}
                       </div>
                       <div style={{ display: "flex", gap: 8, marginTop: 5, flexWrap: "wrap" }}>
                         {[race.distance, race.going, race.type, `${race.runners.length}R`].map((t, i) => (
