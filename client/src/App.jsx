@@ -272,16 +272,10 @@ async function callClaude(prompt, system) {
     }
     const d = await r.json();
     if (d.error) return "Error: " + d.error;
-    return d.content?.map(c => c.text || "").join("
-") || "No response received.";
+    return d.content?.map(c => c.text || "").join("\n") || "No response received.";
   } catch(e) {
     return "Connection error: " + e.message;
   }
-},
-    body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
-  });
-  const d = await r.json();
-  return d.content?.map(c => c.text || "").join("\n") || "Unavailable.";
 }
 
 /* ─── MAIN APP ───────────────────────────────────────────────── */
