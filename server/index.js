@@ -60,14 +60,35 @@ async function fetchFromRacingAPI() {
   try {
     const today = new Date().toISOString().split("T")[0];
     const auth = Buffer.from(`${u}:${p}`).toString("base64");
-    const res = await fetch(
+    // Try pro endpoint first, fall back to standard
+    let res = await fetch(
       `https://api.theracingapi.com/v1/racecards/pro?date=${today}&region_codes=gb&type=flat`,
       { headers: { "Authorization": `Basic ${auth}`, "Content-Type": "application/json" } }
     );
-    if (!res.ok) { console.error("Racing API error:", res.status); return null; }
-    const data = await res.json();
-    if (!data || !data.racecards) return null;
-    const races = data.racecards
+    // If pro fails, try standard endpoint
+    if (!res.ok && res.status === 403) {
+      console.log("Pro endpoint returned 403, trying standard endpoint...");
+      res = await fetch(
+        `https://api.theracingapi.com/v1/racecards?date=${today}&region_codes=gb`,
+        { headers: { "Authorization": `Basic ${auth}`, "Content-Type": "application/json" } }
+      );
+    }
+    console.log("Racing API URL status:", res.status, res.url);
+    const bodyText = await res.text();
+    if (!res.ok) {
+      console.error("Racing API error:", res.status, bodyText.slice(0,300));
+      return null;
+    }
+    let data;
+    try { data = JSON.parse(bodyText); } catch(e) { console.error("Racing API JSON parse error:", e.message); return null; }
+    console.log("Racing API response keys:", Object.keys(data));
+    // API may return different root key — try racecards, races, data, results
+    const racecards = data.racecards || data.races || data.data || data.results || [];
+    if (!racecards || !racecards.length) {
+      console.error("No racecards in response. Keys:", Object.keys(data));
+      return null;
+    }
+    const races = racecards
       .filter(r => r.runners && r.runners.length >= 2)
       .slice(0, 12)
       .map(r => ({
@@ -159,14 +180,42 @@ app.post("/api/claude", async (req, res) => {
   }
 });
 
+// ── DEBUG ENDPOINT ───────────────────────────────────────────────
+app.get("/api/debug", async (req, res) => {
+  const u = process.env.RACING_API_USERNAME;
+  const p = process.env.RACING_API_PASSWORD;
+  const result = { 
+    envVarsSet: { racing_user: !!u, racing_pass: !!p, claude: !!process.env.ANTHROPIC_API_KEY },
+    usernamePreview: u ? u.slice(0,4)+"****" : "NOT SET",
+  };
+  if (u && p) {
+    try {
+      const auth = Buffer.from(`${u}:${p}`).toString("base64");
+      const today = new Date().toISOString().split("T")[0];
+      const testRes = await fetch(`https://api.theracingapi.com/v1/racecards?date=${today}&region_codes=gb`, {
+        headers: { "Authorization": `Basic ${auth}` }
+      });
+      const body = await testRes.text();
+      result.apiStatus = testRes.status;
+      result.apiResponse = body.slice(0, 500);
+    } catch(e) {
+      result.apiError = e.message;
+    }
+  }
+  res.json(result);
+});
+
 // ── HEALTH CHECK ──────────────────────────────────────────────────
 app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     racingAPI: !!(process.env.RACING_API_USERNAME && process.env.RACING_API_PASSWORD),
+    racingAPIUser: process.env.RACING_API_USERNAME ? process.env.RACING_API_USERNAME.slice(0,4) + "****" : "NOT SET",
     claudeAPI: !!process.env.ANTHROPIC_API_KEY,
+    claudeKeyPrefix: process.env.ANTHROPIC_API_KEY ? process.env.ANTHROPIC_API_KEY.slice(0,10) + "****" : "NOT SET",
     cacheValid: cacheIsValid(),
     cachedAt: raceCache.fetchedAt ? new Date(raceCache.fetchedAt).toISOString() : null,
+    nodeVersion: process.version,
   });
 });
 

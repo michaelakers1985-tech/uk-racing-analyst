@@ -256,9 +256,28 @@ function StatPill({ label, val, color }) {
   );
 }
 
-async function callClaude(prompt) {
-  const r = await fetch("/api/claude", {
-    method: "POST", headers: { "Content-Type": "application/json" },
+async function callClaude(prompt, system) {
+  try {
+    const body = { messages: [{ role: "user", content: prompt }] };
+    if (system) body.system = system;
+    const r = await fetch("/api/claude", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) {
+      const err = await r.text();
+      console.error("Claude API error:", r.status, err);
+      return "AI unavailable — check ANTHROPIC_API_KEY is set in Render environment variables.";
+    }
+    const d = await r.json();
+    if (d.error) return "Error: " + d.error;
+    return d.content?.map(c => c.text || "").join("
+") || "No response received.";
+  } catch(e) {
+    return "Connection error: " + e.message;
+  }
+},
     body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
   });
   const d = await r.json();
@@ -284,8 +303,17 @@ export default function App() {
   const [levelStake, setLevelStake] = useState(10);
   const [calcResults, setCalcResults] = useState(null);
 
+  const [apiStatus, setApiStatus] = useState(null);
+
   // Load live races from server on mount
   useEffect(() => {
+    // Check API health
+    fetch("/api/health")
+      .then(r => r.json())
+      .then(d => setApiStatus(d))
+      .catch(() => {});
+
+    // Load races
     fetch("/api/races")
       .then(r => r.json())
       .then(d => {
@@ -401,7 +429,7 @@ Racing Post analytical style. Specific, authoritative, use racing terminology.`
       if (stakeMode === "kelly") stake = Math.round(bankroll * h.kellyF * 100) / 100;
       else if (stakeMode === "level") stake = levelStake;
       else stake = Math.round(bankroll * 0.05 * 100) / 100; // 5% of bankroll
-      const expectedReturn = stake * h.winProb * h.oddsDecimal;
+      const expectedReturn = stake * h.winProb * h.odsDec;
       const expectedProfit = expectedReturn - stake;
       const ev = expectedProfit;
       return { ...h, stake, expectedReturn, expectedProfit, ev };
@@ -418,15 +446,15 @@ Racing Post analytical style. Specific, authoritative, use racing terminology.`
   const winRate = ((history.filter(h => h.result === "WON").length / history.length) * 100).toFixed(0);
 
   const nap = preds?.[0];
-  const ew  = preds?.slice(1, 4).find(h => h.oddsDecimal >= 5);
+  const ew  = preds?.slice(1, 4).find(h => h.odsDec >= 5);
 
   const tabs = [
-    { id: "races",       label: "RACE CARD"    },
-    { id: "predictions", label: "PREDICTIONS", off: !preds && !loading },
-    { id: "ai",          label: "AI REPORT",   off: !preds },
-    { id: "calc",        label: "EARNINGS",    off: !preds },
-    { id: "stats",       label: "ROI TRACKER"  },
-    { id: "custom",      label: "ASK ANALYST"  },
+    { id: "races",       label: "📅 RACE CARD" },
+    { id: "predictions", label: "📊 PREDICTIONS", off: !preds && !loading },
+    { id: "ai",          label: "🤖 AI REPORT",   off: !preds },
+    { id: "calc",        label: "💹 EARNINGS",    off: !preds },
+    { id: "stats",       label: "📈 ROI TRACKER" },
+    { id: "custom",      label: "🔮 ASK ANALYST" },
   ];
 
   const DISCLAIMER = "⚠️ For entertainment only. Not betting advice. BeGambleAware.org";
@@ -481,7 +509,26 @@ Racing Post analytical style. Specific, authoritative, use racing terminology.`
       <div style={{ maxWidth: 960, margin: "0 auto", padding: "16px 16px" }}>
 
         {/* ── DISCLAIMER ── */}
-        <div style={{ background: "#2a0f00", border: `1px solid #7c2d12`, borderRadius: 6, padding: "6px 12px", fontSize: 10, color: "#fb923c", marginBottom: 14, letterSpacing: 1 }}>{DISCLAIMER}</div>
+        <div style={{ background: "#2a0f00", border: "1px solid #7c2d12", borderRadius: 6, padding: "6px 12px", fontSize: 10, color: "#fb923c", marginBottom: 10, letterSpacing: 1 }}>{DISCLAIMER}</div>
+
+        {/* ── API STATUS BAR ── */}
+        {apiStatus && (
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14,alignItems:"flex-start"}}>
+            <div style={{display:"flex",alignItems:"center",gap:5,background:T.card,border:"1px solid "+T.border,borderRadius:6,padding:"5px 10px"}}>
+              <span style={{width:7,height:7,borderRadius:"50%",background:apiStatus.claudeAPI?T.green:T.red,flexShrink:0,display:"inline-block"}}/>
+              <span style={{fontSize:9,color:apiStatus.claudeAPI?T.green:T.red,fontWeight:800,letterSpacing:1}}>CLAUDE AI: {apiStatus.claudeAPI?"✅ CONNECTED":"❌ NOT SET"}</span>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:5,background:T.card,border:"1px solid "+T.border,borderRadius:6,padding:"5px 10px"}}>
+              <span style={{width:7,height:7,borderRadius:"50%",background:apiStatus.racingAPI?T.green:"#f59e0b",flexShrink:0,display:"inline-block"}}/>
+              <span style={{fontSize:9,color:apiStatus.racingAPI?T.green:"#f59e0b",fontWeight:800,letterSpacing:1}}>RACING API: {apiStatus.racingAPI?"✅ CONNECTED":"⚠️ NOT SET"}</span>
+            </div>
+            {!apiStatus.claudeAPI && (
+              <div style={{fontSize:9,color:T.red,background:T.red+"15",border:"1px solid "+T.red+"44",borderRadius:6,padding:"5px 10px"}}>
+                AI reports disabled — add <strong>ANTHROPIC_API_KEY</strong> to Render env vars
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ═══════════════ RACE CARD ═══════════════ */}
         {view === "races" && (
@@ -749,7 +796,7 @@ Racing Post analytical style. Specific, authoritative, use racing terminology.`
                   <StatPill label="EXPECTED RETURN" val={`£${(calcResults.totalStaked + calcResults.totalExpected).toFixed(2)}`} color={T.cyan} />
                   <StatPill label="EXPECTED PROFIT" val={`${calcResults.totalExpected >= 0 ? "+" : ""}£${calcResults.totalExpected.toFixed(2)}`} color={calcResults.totalExpected >= 0 ? T.green : T.red} />
                   <StatPill label="EXP ROI" val={`${((calcResults.totalExpected / calcResults.totalStaked) * 100).toFixed(1)}%`} color={calcResults.totalExpected >= 0 ? T.green : T.red} />
-                  <StatPill label="AVG ODDS" val={`${(preds.reduce((s, h) => s + h.oddsDecimal, 0) / preds.length).toFixed(2)}x`} color={T.purple} />
+                  <StatPill label="AVG ODDS" val={`${(preds.reduce((s, h) => s + h.odsDec, 0) / preds.length).toFixed(2)}x`} color={T.purple} />
                   <StatPill label="AVG WIN PROB" val={`${(preds.reduce((s, h) => s + h.winProb, 0) / preds.length * 100).toFixed(1)}%`} color={T.blue} />
                 </div>
 
