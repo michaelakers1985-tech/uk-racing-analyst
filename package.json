@@ -1,0 +1,19 @@
+{
+  "name": "uk-racing-analyst",
+  "version": "1.0.0",
+  "description": "UK Racing Analyst Pro — AI-powered horse racing prediction engine",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "build": "cd client && npm install && npm run build",
+    "dev": "node server/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "node-fetch": "^2.7.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
