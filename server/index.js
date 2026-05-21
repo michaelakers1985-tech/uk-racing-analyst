@@ -61,10 +61,11 @@ async function fetchFromRacingAPI() {
     const today = new Date().toISOString().split("T")[0];
     const auth = Buffer.from(`${u}:${p}`).toString("base64");
     // Basic Plan endpoint — tries basic first, falls back to standard
+    // Correct Basic Plan endpoint — no date param, region_codes is the filter
     const endpoints = [
       `https://api.theracingapi.com/v1/racecards/basic?region_codes=gb&type=flat`,
       `https://api.theracingapi.com/v1/racecards/basic?region_codes=gb`,
-      `https://api.theracingapi.com/v1/racecards?region_codes=gb`,
+      `https://api.theracingapi.com/v1/racecards/basic`,
     ];
     let res = null;
     for (const url of endpoints) {
@@ -84,8 +85,10 @@ async function fetchFromRacingAPI() {
     let data;
     try { data = JSON.parse(bodyText); } catch(e) { console.error("Racing API JSON parse error:", e.message); return null; }
     console.log("Racing API response keys:", Object.keys(data));
-    // API may return different root key — try racecards, races, data, results
+    console.log("Racing API total races:", data.total || data.count || "unknown");
+    // API returns { racecards: [...] }
     const racecards = data.racecards || data.races || data.data || data.results || [];
+    console.log("Racecards found:", racecards.length);
     if (!racecards || !racecards.length) {
       console.error("No racecards in response. Keys:", Object.keys(data));
       return null;
