@@ -60,20 +60,22 @@ async function fetchFromRacingAPI() {
   try {
     const today = new Date().toISOString().split("T")[0];
     const auth = Buffer.from(`${u}:${p}`).toString("base64");
-    // Try pro endpoint first, fall back to standard
-    let res = await fetch(
-      `https://api.theracingapi.com/v1/racecards/pro?date=${today}&region_codes=gb&type=flat`,
-      { headers: { "Authorization": `Basic ${auth}`, "Content-Type": "application/json" } }
-    );
-    // If pro fails, try standard endpoint
-    if (!res.ok && res.status === 403) {
-      console.log("Pro endpoint returned 403, trying standard endpoint...");
-      res = await fetch(
-        `https://api.theracingapi.com/v1/racecards?date=${today}&region_codes=gb`,
-        { headers: { "Authorization": `Basic ${auth}`, "Content-Type": "application/json" } }
-      );
+    // Basic Plan endpoint — tries basic first, falls back to standard
+    const endpoints = [
+      `https://api.theracingapi.com/v1/racecards/basic?region_codes=gb&type=flat`,
+      `https://api.theracingapi.com/v1/racecards/basic?region_codes=gb`,
+      `https://api.theracingapi.com/v1/racecards?region_codes=gb`,
+    ];
+    let res = null;
+    for (const url of endpoints) {
+      console.log("Trying Racing API endpoint:", url);
+      res = await fetch(url, { headers: { "Authorization": `Basic ${auth}`, "Content-Type": "application/json" } });
+      console.log("  Status:", res.status);
+      if (res.ok) break;
+      if (res.status === 401) { console.error("Auth failed — check credentials"); return null; }
+      if (res.status === 403) { console.log("Plan restriction on this endpoint, trying next..."); }
     }
-    console.log("Racing API URL status:", res.status, res.url);
+    if (!res || !res.ok) { console.error("All endpoints failed, status:", res?.status); return null; }
     const bodyText = await res.text();
     if (!res.ok) {
       console.error("Racing API error:", res.status, bodyText.slice(0,300));
@@ -170,13 +172,31 @@ app.post("/api/claude", async (req, res) => {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, ...req.body }),
+      body: JSON.stringify({ model: "claude-sonnet-4-5", max_tokens: 1000, ...req.body }),
     });
     const data = await response.json();
     if (!response.ok) return res.status(response.status).json(data);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: "Proxy failed", detail: err.message });
+  }
+});
+
+// ── CLAUDE TEST ENDPOINT ─────────────────────────────────────────
+app.get("/api/test-claude", async (req, res) => {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return res.json({ success: false, error: "ANTHROPIC_API_KEY not set" });
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model: "claude-sonnet-4-5", max_tokens: 50, messages: [{ role: "user", content: "Say OK" }] }),
+    });
+    const data = await response.json();
+    if (!response.ok) return res.json({ success: false, status: response.status, error: data });
+    res.json({ success: true, status: response.status, reply: data.content?.[0]?.text });
+  } catch(err) {
+    res.json({ success: false, error: err.message });
   }
 });
 
@@ -192,7 +212,8 @@ app.get("/api/debug", async (req, res) => {
     try {
       const auth = Buffer.from(`${u}:${p}`).toString("base64");
       const today = new Date().toISOString().split("T")[0];
-      const testRes = await fetch(`https://api.theracingapi.com/v1/racecards?date=${today}&region_codes=gb`, {
+      // Basic Plan endpoint
+      const testRes = await fetch(`https://api.theracingapi.com/v1/racecards/basic?region_codes=gb&type=flat`, {
         headers: { "Authorization": `Basic ${auth}` }
       });
       const body = await testRes.text();
