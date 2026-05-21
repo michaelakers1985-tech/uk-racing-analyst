@@ -42,13 +42,16 @@ function formatForm(f) {
 }
 function getRaceType(race) {
   const p = race.pattern || race.race_type || "";
+  // actual field is race_class e.g. "Class 6"
+  const rc = race.race_class || race.class || "";
+  if (p.includes("Group 1") || rc.includes("Group 1")) return "Group 1";
+  if (p.includes("Group 2") || rc.includes("Group 2")) return "Group 2";
+  if (p.includes("Group 3") || rc.includes("Group 3")) return "Group 3";
+  if (p.includes("Listed") || rc.includes("Listed")) return "Listed";
+  if (rc.includes("Class")) return rc; // already formatted e.g. "Class 6"
   const c = String(race.class||"");
-  if (p.includes("Group 1")) return "Group 1";
-  if (p.includes("Group 2")) return "Group 2";
-  if (p.includes("Group 3")) return "Group 3";
-  if (p.includes("Listed")) return "Listed";
   const cn = parseInt(c);
-  if (cn>=1&&cn<=6) return `Class ${cn}`;
+  if (cn>=1&&cn<=6) return "Class " + cn;
   return race.type || "Flat";
 }
 
@@ -97,23 +100,23 @@ async function fetchFromRacingAPI() {
       .filter(r => r.runners && r.runners.length >= 2)
       .slice(0, 12)
       .map(r => ({
-        id: r.race_id || `r_${Date.now()}_${Math.random()}`,
-        time: formatTime(r.off_dt || r.off),
+        id: r.race_id || ("r_" + Date.now() + "_" + Math.random()),
+        time: formatTime(r.off_dt || r.off_time || r.off),
         course: r.course || r.venue || "Unknown",
         name: r.race_name || r.title || "Race",
-        distance: r.distance_round || r.dist || "1m",
-        going: r.going || "Good",
+        distance: r.distance_round || r.distance || r.dist || "1m",
+        going: (r.going_detailed || r.going || "Good").split(",")[0].trim(),
         type: getRaceType(r),
         live: true,
         runners: (r.runners||[]).slice(0,20).map((h,i) => ({
-          name: h.horse || h.name || `Runner ${i+1}`,
-          trainer: h.trainer?.name || h.trainer || "Unknown",
-          jockey: h.jockey?.name || h.jockey || "Unknown",
-          weight: formatWeight(h.lbs || h.weight_lbs),
+          name: h.horse || h.name || ("Runner " + (i+1)),
+          trainer: (typeof h.trainer === "object" ? h.trainer?.name : h.trainer) || "Unknown",
+          jockey: (typeof h.jockey === "object" ? h.jockey?.name : h.jockey) || "Unknown",
+          weight: formatWeight(h.lbs || h.weight_lbs || h.weight),
           draw: parseInt(h.draw) || i+1,
-          odds: formatOdds(h.sp_dec || h.odds || h.current_odds),
-          form: formatForm(h.form || h.last_run_form),
-          or: parseInt(h.ofr || h.official_rating) || 90,
+          odds: formatOdds(h.sp_dec || h.odds || h.current_odds || h.win_odds),
+          form: formatForm(h.form || h.last_run_form || h.recent_form),
+          or: parseInt(h.ofr || h.official_rating || h.or) || 90,
         }))
       }));
     return races.length > 0 ? races : null;
