@@ -265,23 +265,21 @@ async function callClaude(prompt, system) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     });
+    const responseText = await r.text();
     if (!r.ok) {
-      const err = await r.text();
-      console.error("Claude API error:", r.status, err);
-      return "AI unavailable — check ANTHROPIC_API_KEY is set in Render environment variables.";
+      console.error("Claude API error:", r.status, responseText);
+      return "Server error " + r.status + ": " + responseText.slice(0, 200);
     }
-    const d = await r.json();
-    if (d.error) return "Error: " + d.error;
-    return d.content?.map(c => c.text || "").join("
-") || "No response received.";
+    let d;
+    try { d = JSON.parse(responseText); } catch(e) {
+      return "JSON parse error: " + responseText.slice(0, 200);
+    }
+    if (d.error) return "API error: " + JSON.stringify(d.error);
+    return d.content?.map(c => c.text || "").join("\n") || "No response received.";
   } catch(e) {
+    console.error("callClaude exception:", e);
     return "Connection error: " + e.message;
   }
-},
-    body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
-  });
-  const d = await r.json();
-  return d.content?.map(c => c.text || "").join("\n") || "Unavailable.";
 }
 
 /* ─── MAIN APP ───────────────────────────────────────────────── */
