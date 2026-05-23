@@ -13,7 +13,7 @@ app.use(express.json());
 let raceCache = { data: null, fetchedAt: null };
 function cacheIsValid() {
   if (!raceCache.data || !raceCache.fetchedAt) return false;
-  return (Date.now() - raceCache.fetchedAt) < 60 * 60 * 1000; // 1 hour
+  return (Date.now() - raceCache.fetchedAt) < 15 * 60 * 1000; // 15 minutes
 }
 
 // ── RACING API TRANSFORM HELPERS ──────────────────────────────────
@@ -253,6 +253,22 @@ app.get("/api/debug", async (req, res) => {
       const body = await testRes.text();
       result.apiStatus = testRes.status;
       result.apiResponse = body.slice(0, 500);
+      // Also show first runner fields to check odds availability
+      try {
+        const parsed = JSON.parse(body);
+        const firstRace = parsed.racecards?.[0];
+        const firstRunner = firstRace?.runners?.[0];
+        if (firstRunner) {
+          result.firstRunnerFields = Object.keys(firstRunner);
+          result.firstRunnerSample = {
+            name: firstRunner.horse || firstRunner.name,
+            odds: firstRunner.sp_dec || firstRunner.odds || firstRunner.win_odds || firstRunner.current_odds || firstRunner.price,
+            allOddsFields: Object.keys(firstRunner).filter(k => 
+              k.includes("odds") || k.includes("price") || k.includes("sp") || k.includes("win")
+            )
+          };
+        }
+      } catch(e) { result.parseError = e.message; }
     } catch(e) {
       result.apiError = e.message;
     }
