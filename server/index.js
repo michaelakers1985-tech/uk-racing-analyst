@@ -19,8 +19,17 @@ function cacheIsValid() {
 // ── RACING API TRANSFORM HELPERS ──────────────────────────────────
 function formatTime(dt) {
   if (!dt) return "TBC";
-  if (String(dt).includes("T")) return new Date(dt).toTimeString().slice(0,5);
-  return String(dt).slice(0,5);
+  if (String(dt).includes("T")) {
+    // off_dt already includes timezone offset e.g. "2026-05-23T14:10:00+01:00"
+    // Parse it and display in local UK time (BST = UTC+1 in summer)
+    const d = new Date(dt);
+    return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" });
+  }
+  // off_time is plain "2:10" — already in UK local time from the API
+  const t = String(dt).replace(/[^0-9:]/g,"");
+  const [h, m] = t.split(":").map(Number);
+  if (isNaN(h) || isNaN(m)) return dt;
+  return String(h).padStart(2,"0") + ":" + String(m).padStart(2,"0");
 }
 function formatWeight(lbs) {
   if (!lbs) return "9-0";
@@ -110,12 +119,15 @@ async function fetchFromRacingAPI() {
           return now < cutoff;
         }
         if (r.off_time) {
-          // Parse "14:10" style time
-          const [hours, mins] = r.off_time.replace(/[^0-9:]/g,"").split(":").map(Number);
-          const raceTime = new Date();
+          // off_time is in UK local time e.g. "2:10" or "14:10"
+          const t = r.off_time.replace(/[^0-9:]/g,"");
+          const [hours, mins] = t.split(":").map(Number);
+          // Get current UK time
+          const ukNow = new Date(now.toLocaleString("en-GB", { timeZone: "Europe/London" }));
+          const raceTime = new Date(ukNow);
           raceTime.setHours(hours, mins, 0, 0);
           const cutoff = new Date(raceTime.getTime() + 15 * 60 * 1000);
-          return now < cutoff;
+          return ukNow < cutoff;
         }
         return true; // keep if no time info
       })
