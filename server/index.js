@@ -98,9 +98,28 @@ async function fetchFromRacingAPI() {
       return null;
     }
     const races = racecards
-      .filter(r => r.runners && r.runners.length >= 2)
+      .filter(r => {
+        if (!r.runners || r.runners.length < 2) return false;
+        // Filter out races that have already been run
+        // off_dt is ISO datetime e.g. "2026-05-21T14:10:00+01:00"
+        // off_time is e.g. "2:10" — add 15 min buffer so in-running races still show
+        const now = new Date();
+        if (r.off_dt) {
+          const raceTime = new Date(r.off_dt);
+          const cutoff = new Date(raceTime.getTime() + 15 * 60 * 1000); // 15 min after off
+          return now < cutoff;
+        }
+        if (r.off_time) {
+          // Parse "14:10" style time
+          const [hours, mins] = r.off_time.replace(/[^0-9:]/g,"").split(":").map(Number);
+          const raceTime = new Date();
+          raceTime.setHours(hours, mins, 0, 0);
+          const cutoff = new Date(raceTime.getTime() + 15 * 60 * 1000);
+          return now < cutoff;
+        }
+        return true; // keep if no time info
+      })
       .sort((a,b) => {
-        // Sort by off time
         const ta = (a.off_dt || a.off_time || "99:99");
         const tb = (b.off_dt || b.off_time || "99:99");
         return ta.localeCompare(tb);
