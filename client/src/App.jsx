@@ -143,12 +143,23 @@ function fullScore(horse, race, fieldSize) {
   const pb = PARTNERSHIP_BONUS[getPartnershipKey(horse.trainer, horse.jockey)] || 0;
   const eloVal = eloRating(trW, jkW, pb);
   const eloNorm = Math.min(1, Math.max(0, (eloVal - 1300) / 500));
-  const parts = horse.odds.split("/");
-  const oddsNum = parseFloat(parts[0]); const oddsDen = parseFloat(parts[1]);
-  const impliedP = oddsDen / (oddsNum + oddsDen);
+  // Handle TBC/missing odds — fall back to equal probability across field
+  const oddsStr = horse.odds || "TBC";
+  let impliedP, oddsDecimal;
+  if (!oddsStr || oddsStr === "TBC" || oddsStr === "—" || !oddsStr.includes("/")) {
+    impliedP = 1 / (fieldSize || 8);
+    oddsDecimal = fieldSize || 8;
+  } else {
+    const parts = oddsStr.split("/");
+    const oddsNum = parseFloat(parts[0]) || 1;
+    const oddsDen = parseFloat(parts[1]) || 1;
+    impliedP = isNaN(oddsDen/(oddsNum+oddsDen)) ? 1/(fieldSize||8) : oddsDen/(oddsNum+oddsDen);
+    oddsDecimal = isNaN((oddsNum/oddsDen)+1) ? (fieldSize||8) : (oddsNum/oddsDen)+1;
+  }
+  // When no odds available, reduce market weight so other models dominate
+  const marketWeight = (oddsStr === "TBC" || !oddsStr.includes("/")) ? 0.05 : 0.35;
   const lambdaRaw = ba * 0.28 + eloNorm * 0.20 + gScore * 0.15 + dScore * 0.10 + wScore * 0.08 + cScore * 0.09 + consScore * 0.10;
-  const modelP = marketBayesianUpdate(lambdaRaw, impliedP, 0.35);
-  const oddsDecimal = (oddsNum / oddsDen) + 1;
+  const modelP = marketBayesianUpdate(lambdaRaw, impliedP, marketWeight);
   const kellyF = kellyCriterion(modelP, oddsDecimal);
   const modelScores = {
     bayesian:    Math.round(ba * 100),
@@ -427,7 +438,7 @@ Racing Post analytical style. Specific, authoritative, use racing terminology.`
       if (stakeMode === "kelly") stake = Math.round(bankroll * h.kellyF * 100) / 100;
       else if (stakeMode === "level") stake = levelStake;
       else stake = Math.round(bankroll * 0.05 * 100) / 100; // 5% of bankroll
-      const expectedReturn = stake * h.winProb * h.odsDec;
+      const expectedReturn = stake * h.winProb * h.oddsDecimal;
       const expectedProfit = expectedReturn - stake;
       const ev = expectedProfit;
       return { ...h, stake, expectedReturn, expectedProfit, ev };
@@ -444,7 +455,7 @@ Racing Post analytical style. Specific, authoritative, use racing terminology.`
   const winRate = ((history.filter(h => h.result === "WON").length / history.length) * 100).toFixed(0);
 
   const nap = preds?.[0];
-  const ew  = preds?.slice(1, 4).find(h => h.odsDec >= 5);
+  const ew  = preds?.slice(1, 4).find(h => (h.oddsDecimal||8) >= 5);
 
   const tabs = [
     { id: "races",       label: "📅 RACE CARD" },
@@ -794,7 +805,7 @@ Racing Post analytical style. Specific, authoritative, use racing terminology.`
                   <StatPill label="EXPECTED RETURN" val={`£${(calcResults.totalStaked + calcResults.totalExpected).toFixed(2)}`} color={T.cyan} />
                   <StatPill label="EXPECTED PROFIT" val={`${calcResults.totalExpected >= 0 ? "+" : ""}£${calcResults.totalExpected.toFixed(2)}`} color={calcResults.totalExpected >= 0 ? T.green : T.red} />
                   <StatPill label="EXP ROI" val={`${((calcResults.totalExpected / calcResults.totalStaked) * 100).toFixed(1)}%`} color={calcResults.totalExpected >= 0 ? T.green : T.red} />
-                  <StatPill label="AVG ODDS" val={`${(preds.reduce((s, h) => s + h.odsDec, 0) / preds.length).toFixed(2)}x`} color={T.purple} />
+                  <StatPill label="AVG ODDS" val={`${(preds.reduce((s, h) => s + h.oddsDecimal, 0) / preds.length).toFixed(2)}x`} color={T.purple} />
                   <StatPill label="AVG WIN PROB" val={`${(preds.reduce((s, h) => s + h.winProb, 0) / preds.length * 100).toFixed(1)}%`} color={T.blue} />
                 </div>
 
@@ -815,7 +826,7 @@ Racing Post analytical style. Specific, authoritative, use racing terminology.`
                         </div>
                         <div style={{ fontSize: 12, fontWeight: 700, color: T.gold }}>£{h.stake.toFixed(2)}</div>
                         <div style={{ fontSize: 12, fontWeight: 700, color: T.text }}>{h.odds}</div>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: T.green }}>{(h.winProb * 100).toFixed(1)}%</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: T.green }}>{(isNaN(h.winProb) ? 0 : h.winProb * 100).toFixed(1)}%</div>
                         <div style={{ fontSize: 12, fontWeight: 700, color: T.cyan }}>£{h.expectedReturn.toFixed(2)}</div>
                         <div style={{ fontSize: 12, fontWeight: 700, color: pos }}>
                           {h.expectedProfit >= 0 ? "+" : ""}£{h.expectedProfit.toFixed(2)}
