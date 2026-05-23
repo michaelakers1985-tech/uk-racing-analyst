@@ -580,7 +580,7 @@ Racing Post analytical style. Specific, authoritative, use racing terminology.`
                       <div style={{ fontSize: 10, color: T.muted, letterSpacing: 1 }}>OR:{h.or}</div>
                       <div style={{ fontSize: 10, color: T.muted }}>D{h.draw} {h.weight}</div>
                       <FormPips form={h.form} />
-                      <span style={{ fontWeight: 900, color: T.gold, fontSize: 13, minWidth: 45, textAlign: "right" }}>{h.odds}</span>
+                      <span style={{ fontWeight: 900, color: h.odds==="TBC"?T.muted:T.gold, fontSize: 13, minWidth: 45, textAlign: "right" }}>{h.odds==="TBC" ? "—" : h.odds}</span>
                     </div>
                   ))}
                 </div>

@@ -27,14 +27,15 @@ function formatWeight(lbs) {
   return `${Math.floor(lbs/14)}-${lbs%14}`;
 }
 function formatOdds(odds) {
-  if (!odds) return "10/1";
+  if (!odds || odds === "0" || odds === 0) return "TBC";
   const n = parseFloat(odds);
-  if (isNaN(n) || n <= 1) return String(odds) || "10/1";
+  if (isNaN(n)) return String(odds);
+  if (n <= 1.01) return "TBC";
   const dec = n - 1;
-  const fracs = [[1,5],[1,4],[1,3],[2,5],[1,2],[4,6],[4,5],[1,1],[6,5],[5,4],[7,5],[3,2],[7,4],[2,1],[9,4],[5,2],[3,1],[7,2],[4,1],[9,2],[5,1],[6,1],[7,1],[8,1],[10,1],[12,1],[14,1],[16,1],[20,1],[25,1],[33,1],[50,1]];
-  let best = fracs[fracs.length-1], bestDiff = Infinity;
+  const fracs = [[1,10],[1,7],[1,5],[1,4],[1,3],[2,5],[1,2],[8,13],[4,6],[8,11],[4,5],[5,6],[1,1],[11,10],[6,5],[5,4],[11,8],[6,4],[13,8],[7,4],[2,1],[9,4],[5,2],[11,4],[3,1],[100,30],[7,2],[4,1],[9,2],[5,1],[11,2],[6,1],[13,2],[7,1],[8,1],[9,1],[10,1],[11,1],[12,1],[14,1],[16,1],[20,1],[25,1],[33,1],[50,1],[66,1],[100,1]];
+  let best = [10,1], bestDiff = Infinity;
   for (const [num,den] of fracs) { const d=Math.abs(num/den-dec); if(d<bestDiff){bestDiff=d;best=[num,den];} }
-  return `${best[0]}/${best[1]}`;
+  return best[0] + "/" + best[1];
 }
 function formatForm(f) {
   if (!f) return "0-0-0";
@@ -66,8 +67,8 @@ async function fetchFromRacingAPI() {
     // Basic Plan endpoint — tries basic first, falls back to standard
     // Correct Basic Plan endpoint — no date param, region_codes is the filter
     const endpoints = [
-      `https://api.theracingapi.com/v1/racecards/basic?region_codes=gb`,
       `https://api.theracingapi.com/v1/racecards/basic`,
+      `https://api.theracingapi.com/v1/racecards/basic?region_codes=gb`,
       `https://api.theracingapi.com/v1/racecards?region_codes=gb`,
     ];
     let res = null;
@@ -98,7 +99,13 @@ async function fetchFromRacingAPI() {
     }
     const races = racecards
       .filter(r => r.runners && r.runners.length >= 2)
-      .slice(0, 12)
+      .sort((a,b) => {
+        // Sort by off time
+        const ta = (a.off_dt || a.off_time || "99:99");
+        const tb = (b.off_dt || b.off_time || "99:99");
+        return ta.localeCompare(tb);
+      })
+      .slice(0, 25)
       .map(r => ({
         id: r.race_id || ("r_" + Date.now() + "_" + Math.random()),
         time: formatTime(r.off_dt || r.off_time || r.off),
@@ -119,6 +126,8 @@ async function fetchFromRacingAPI() {
           or: parseInt(h.ofr || h.official_rating || h.or) || 90,
         }))
       }));
+    console.log("Courses returned:", [...new Set(races.map(r => r.course))].join(", "));
+    console.log("Total races:", races.length);
     return races.length > 0 ? races : null;
   } catch (err) {
     console.error("Racing API fetch failed:", err.message);
