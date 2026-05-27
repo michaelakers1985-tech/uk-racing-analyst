@@ -78,22 +78,34 @@ async function fetchFromRacingAPI() {
     const endpoints = [
       `https://api.theracingapi.com/v1/racecards/standard`,
       `https://api.theracingapi.com/v1/racecards/basic`,
+      `https://api.theracingapi.com/v1/racecards/basic?region_codes=gb`,
     ];
     let res = null;
+    let lastError = "";
     for (const url of endpoints) {
       console.log("Trying Racing API endpoint:", url);
       res = await fetch(url, { headers: { "Authorization": `Basic ${auth}`, "Content-Type": "application/json" } });
-      console.log("  Status:", res.status);
-      if (res.ok) break;
+      const body = await res.text();
+      console.log("  Status:", res.status, "Body:", body.slice(0, 200));
+      lastError = `${res.status}: ${body.slice(0,200)}`;
+      if (res.ok) {
+        // Re-parse since we consumed the body
+        res = { ok: true, _body: body };
+        break;
+      }
+      if (res.status === 401 && url.includes("standard")) { 
+        console.log("Standard plan not active, trying basic...");
+        continue;
+      }
       if (res.status === 401) { console.error("Auth failed — check credentials"); return null; }
-      if (res.status === 403) { console.log("Plan restriction on this endpoint, trying next..."); }
     }
-    if (!res || !res.ok) { console.error("All endpoints failed, status:", res?.status); return null; }
-    const bodyText = await res.text();
-    if (!res.ok) {
-      console.error("Racing API error:", res.status, bodyText.slice(0,300));
-      return null;
+    if (!res || !res.ok) { 
+      console.error("All endpoints failed. Last error:", lastError); 
+      return null; 
     }
+    // Use pre-read body
+    const bodyText = res._body;
+    if (!bodyText) { console.error("No body received"); return null; }
     let data;
     try { data = JSON.parse(bodyText); } catch(e) { console.error("Racing API JSON parse error:", e.message); return null; }
     console.log("Racing API response keys:", Object.keys(data));
@@ -165,6 +177,138 @@ async function fetchFromRacingAPI() {
   }
 }
 
+// ── BETFAIR ODDS INTEGRATION ─────────────────────────────────────
+// Fetches live exchange odds for today's UK horse racing
+async function fetchBetfairOdds() {
+  const apiKey = process.env.BETFAIR_API_KEY;
+  if (!apiKey) { console.log("No Betfair API key"); return {}; }
+
+  try {
+    // Step 1: Get today's UK horse racing event IDs
+    const listEventsRes = await fetch(
+      "https://api.betfair.com/exchange/betting/rest/v1.0/listEvents/",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Application": apiKey,
+          "X-Authentication": apiKey,
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          filter: {
+            eventTypeIds: ["7"], // 7 = Horse Racing
+            marketCountries: ["GB"],
+            marketStartTime: {
+              from: new Date().toISOString().split("T")[0] + "T00:00:00Z",
+              to: new Date().toISOString().split("T")[0] + "T23:59:59Z"
+            }
+          }
+        })
+      }
+    );
+
+    if (!listEventsRes.ok) {
+      console.error("Betfair listEvents error:", listEventsRes.status);
+      return {};
+    }
+
+    const events = await listEventsRes.json();
+    if (!events || !events.length) { console.log("No Betfair events found"); return {}; }
+
+    const eventIds = events.map(e => e.event.id);
+
+    // Step 2: Get WIN markets for these events
+    const listMarketsRes = await fetch(
+      "https://api.betfair.com/exchange/betting/rest/v1.0/listMarketCatalogue/",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Application": apiKey,
+          "X-Authentication": apiKey,
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          filter: {
+            eventIds: eventIds,
+            marketTypeCodes: ["WIN"]
+          },
+          marketProjection: ["RUNNER_METADATA", "EVENT", "MARKET_START_TIME"],
+          maxResults: 200
+        })
+      }
+    );
+
+    if (!listMarketsRes.ok) {
+      console.error("Betfair listMarketCatalogue error:", listMarketsRes.status);
+      return {};
+    }
+
+    const markets = await listMarketsRes.json();
+    if (!markets || !markets.length) { console.log("No Betfair markets found"); return {}; }
+
+    const marketIds = markets.map(m => m.marketId);
+
+    // Step 3: Get live odds for all markets
+    const listOddsRes = await fetch(
+      "https://api.betfair.com/exchange/betting/rest/v1.0/listMarketBook/",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Application": apiKey,
+          "X-Authentication": apiKey,
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          marketIds: marketIds,
+          priceProjection: {
+            priceData: ["EX_BEST_OFFERS"],
+            exBestOffersOverrides: { bestPricesDepth: 1 }
+          }
+        })
+      }
+    );
+
+    if (!listOddsRes.ok) {
+      console.error("Betfair listMarketBook error:", listOddsRes.status);
+      return {};
+    }
+
+    const oddsData = await listOddsRes.json();
+
+    // Build lookup: marketId -> { runnerId -> bestBackOdds }
+    const oddsLookup = {};
+    for (const market of oddsData) {
+      oddsLookup[market.marketId] = {};
+      for (const runner of (market.runners || [])) {
+        const bestBack = runner.ex?.availableToBack?.[0]?.price;
+        if (bestBack) oddsLookup[market.marketId][runner.selectionId] = bestBack;
+      }
+    }
+
+    // Build final lookup: horseName (lowercase) -> decimal odds
+    const horseOdds = {};
+    for (const market of markets) {
+      const mOdds = oddsLookup[market.marketId] || {};
+      for (const runner of (market.runners || [])) {
+        const dec = mOdds[runner.selectionId];
+        if (dec && runner.runnerName) {
+          horseOdds[runner.runnerName.toLowerCase().trim()] = dec;
+        }
+      }
+    }
+
+    console.log("Betfair odds fetched for", Object.keys(horseOdds).length, "runners");
+    return horseOdds;
+
+  } catch(err) {
+    console.error("Betfair fetch error:", err.message);
+    return {};
+  }
+}
+
 // ── SAMPLE DATA FALLBACK ──────────────────────────────────────────
 const SAMPLE_RACES = [
   { id:"s1", time:"13:30", course:"Newmarket", name:"Newmarket Sprint Stakes", distance:"6f", going:"Good to Firm", type:"Class 2", live:false,
@@ -194,18 +338,48 @@ const SAMPLE_RACES = [
     ]},
 ];
 
+// ── MERGE BETFAIR ODDS INTO RACES ────────────────────────────────
+function mergeOdds(races, betfairOdds) {
+  if (!betfairOdds || !Object.keys(betfairOdds).length) return races;
+  return races.map(race => ({
+    ...race,
+    runners: race.runners.map(runner => {
+      const key = runner.name.toLowerCase().trim();
+      const dec = betfairOdds[key];
+      if (!dec) return runner;
+      return { ...runner, odds: formatOdds(dec), oddsDecimal: dec };
+    })
+  }));
+}
+
 // ── RACE ENDPOINTS ────────────────────────────────────────────────
 app.get("/api/races", async (req, res) => {
   if (cacheIsValid()) return res.json({ races: raceCache.data, source: "cache" });
-  const live = await fetchFromRacingAPI();
-  if (live) { raceCache = { data: live, fetchedAt: Date.now() }; return res.json({ races: live, source: "live" }); }
+
+  // Fetch races and Betfair odds in parallel
+  const [live, betfairOdds] = await Promise.all([
+    fetchFromRacingAPI(),
+    fetchBetfairOdds()
+  ]);
+
+  if (live) {
+    const withOdds = mergeOdds(live, betfairOdds);
+    const oddsCount = withOdds.reduce((s,r) => s + r.runners.filter(h => h.odds !== "TBC").length, 0);
+    console.log("Merged Betfair odds into", oddsCount, "runners");
+    raceCache = { data: withOdds, fetchedAt: Date.now() };
+    return res.json({ races: withOdds, source: "live", oddsSource: oddsCount > 0 ? "betfair" : "none" });
+  }
   return res.json({ races: SAMPLE_RACES, source: "sample" });
 });
 
 app.post("/api/races/refresh", async (req, res) => {
   raceCache = { data: null, fetchedAt: null };
-  const live = await fetchFromRacingAPI();
-  if (live) { raceCache = { data: live, fetchedAt: Date.now() }; return res.json({ races: live, source: "live", refreshed: true }); }
+  const [live, betfairOdds] = await Promise.all([fetchFromRacingAPI(), fetchBetfairOdds()]);
+  if (live) {
+    const withOdds = mergeOdds(live, betfairOdds);
+    raceCache = { data: withOdds, fetchedAt: Date.now() };
+    return res.json({ races: withOdds, source: "live", refreshed: true });
+  }
   return res.json({ races: SAMPLE_RACES, source: "sample", refreshed: true });
 });
 
@@ -292,6 +466,7 @@ app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     racingAPI: !!(process.env.RACING_API_USERNAME && process.env.RACING_API_PASSWORD),
+    betfairAPI: !!process.env.BETFAIR_API_KEY,
     racingAPIUser: process.env.RACING_API_USERNAME ? process.env.RACING_API_USERNAME.slice(0,4) + "****" : "NOT SET",
     claudeAPI: !!process.env.ANTHROPIC_API_KEY,
     claudeKeyPrefix: process.env.ANTHROPIC_API_KEY ? process.env.ANTHROPIC_API_KEY.slice(0,10) + "****" : "NOT SET",
