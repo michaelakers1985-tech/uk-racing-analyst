@@ -76,9 +76,8 @@ async function fetchFromRacingAPI() {
     // Basic Plan endpoint — tries basic first, falls back to standard
     // Correct Basic Plan endpoint — no date param, region_codes is the filter
     const endpoints = [
+      `https://api.theracingapi.com/v1/racecards/standard`,
       `https://api.theracingapi.com/v1/racecards/basic`,
-      `https://api.theracingapi.com/v1/racecards/basic?region_codes=gb`,
-      `https://api.theracingapi.com/v1/racecards?region_codes=gb`,
     ];
     let res = null;
     for (const url of endpoints) {
@@ -259,7 +258,7 @@ app.get("/api/debug", async (req, res) => {
       const auth = Buffer.from(`${u}:${p}`).toString("base64");
       const today = new Date().toISOString().split("T")[0];
       // Basic Plan endpoint
-      const testRes = await fetch(`https://api.theracingapi.com/v1/racecards/basic?region_codes=gb`, {
+      const testRes = await fetch(`https://api.theracingapi.com/v1/racecards/standard`, {
         headers: { "Authorization": `Basic ${auth}` }
       });
       const body = await testRes.text();
